@@ -61,6 +61,9 @@ void bad_usb_scene_work_on_enter(void* context) {
     bool first_script_load = scene_manager_get_scene_state(app->scene_manager, BadUsbSceneWork);
     if(first_script_load) {
         memcpy(&app->script_hid_cfg, &app->user_hid_cfg, sizeof(app->script_hid_cfg));
+        // If a BT Remote profile is selected, re-apply it now so the profile's MAC/name
+        // take precedence over the blank user BLE settings we just memcpy'd in.
+        bad_usb_reapply_bt_remote_profile(app);
         scene_manager_set_scene_state(app->scene_manager, BadUsbSceneWork, false);
     }
     // Interface and config are passed as pointers as ID/BLE_ID/BT_ID config can modify them

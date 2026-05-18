@@ -8,6 +8,7 @@ enum ConfigIndex {
 enum ConfigIndexBle {
     ConfigIndexBlePersistPairing = ConfigIndexConnection + 1,
     ConfigIndexBlePairingMode,
+    ConfigIndexBleBtRemoteProfile,
     ConfigIndexBleSetDeviceName,
     ConfigIndexBleSetMacAddress,
     ConfigIndexBleRandomizeMacAddress,
@@ -63,6 +64,27 @@ void bad_usb_scene_config_ble_pairing_mode_callback(VariableItem* item) {
     variable_item_set_current_value_text(item, ble_pairing_mode_names[index]);
 }
 
+void bad_usb_scene_config_ble_bt_remote_profile_callback(VariableItem* item) {
+    BadUsbApp* bad_usb = variable_item_get_context(item);
+    uint8_t index = variable_item_get_current_value_index(item);
+    const BadUsbHidApi* hid = bad_usb_hid_get_interface(bad_usb->interface);
+
+    if(index == 0) {
+        // None — restore user's manual BLE settings into script config
+        furi_string_reset(bad_usb->bt_remote_profile);
+        memcpy(
+            &bad_usb->script_hid_cfg.ble,
+            &bad_usb->user_hid_cfg.ble,
+            sizeof(bad_usb->script_hid_cfg.ble));
+        hid->adjust_config(&bad_usb->script_hid_cfg);
+        variable_item_set_current_value_text(item, "None");
+    } else {
+        uint8_t list_idx = index - 1;
+        bad_usb_select_bt_remote_profile(bad_usb, list_idx);
+        variable_item_set_current_value_text(item, bad_usb->bt_remote_profile_list[list_idx]);
+    }
+}
+
 void bad_usb_scene_config_select_callback(void* context, uint32_t index) {
     BadUsbApp* bad_usb = context;
 
@@ -103,6 +125,33 @@ static void draw_menu(BadUsbApp* bad_usb) {
             bad_usb);
         variable_item_set_current_value_index(item, ble_hid_cfg->pairing);
         variable_item_set_current_value_text(item, ble_pairing_mode_names[ble_hid_cfg->pairing]);
+
+        // BT Remotes profile selection
+        bad_usb_load_bt_remote_profile_list(bad_usb);
+        uint8_t profile_values = bad_usb->bt_remote_profile_count + 1; // +1 for "None"
+        item = variable_item_list_add(
+            var_item_list,
+            "BT Remote Profile",
+            profile_values,
+            bad_usb_scene_config_ble_bt_remote_profile_callback,
+            bad_usb);
+        // Find the currently-selected profile in the list
+        uint8_t current_profile_idx = 0;
+        if(!furi_string_empty(bad_usb->bt_remote_profile)) {
+            for(uint8_t i = 0; i < bad_usb->bt_remote_profile_count; i++) {
+                if(strcmp(
+                       furi_string_get_cstr(bad_usb->bt_remote_profile),
+                       bad_usb->bt_remote_profile_list[i]) == 0) {
+                    current_profile_idx = i + 1;
+                    break;
+                }
+            }
+        }
+        variable_item_set_current_value_index(item, current_profile_idx);
+        variable_item_set_current_value_text(
+            item,
+            current_profile_idx == 0 ? "None" :
+                                       bad_usb->bt_remote_profile_list[current_profile_idx - 1]);
 
         variable_item_list_add(var_item_list, "Set Device Name", 0, NULL, NULL);
 
@@ -184,6 +233,8 @@ bool bad_usb_scene_config_on_event(void* context, SceneManagerEvent event) {
                 scene_manager_next_scene(bad_usb->scene_manager, BadUsbSceneDone);
                 break;
             case ConfigIndexBleRestoreDefaults:
+                // Clear BT Remote profile selection
+                furi_string_reset(bad_usb->bt_remote_profile);
                 // Apply to current script config
                 bad_usb->script_hid_cfg.ble.name[0] = '\0';
                 memset(

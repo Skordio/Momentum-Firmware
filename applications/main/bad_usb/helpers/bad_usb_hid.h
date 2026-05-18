@@ -9,6 +9,8 @@ extern "C" {
 
 #include "ble_hid_ext_profile.h"
 
+#define HID_BT_KEYS_STORAGE_NAME ".bt_hid.keys"
+
 typedef enum {
     BadUsbHidInterfaceUsb,
     BadUsbHidInterfaceBle,

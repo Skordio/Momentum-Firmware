@@ -10,6 +10,123 @@
 #define BAD_USB_SETTINGS_VERSION        1
 #define BAD_USB_SETTINGS_DEFAULT_LAYOUT BAD_USB_APP_PATH_LAYOUT_FOLDER "/en-US.kl"
 
+#define BAD_USB_BT_REMOTES_PROFILES_DIR EXT_PATH("apps_data/bt_remotes/profiles")
+#define BAD_USB_BT_REMOTES_CFG_EXT      ".cfg"
+#define BAD_USB_BT_REMOTES_KEYS_EXT     ".keys"
+#define BAD_USB_BT_REMOTES_CFG_FILETYPE "Flipper BT Remote Settings File"
+
+void bad_usb_load_bt_remote_profile_list(BadUsbApp* app) {
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+    File* dir = storage_file_alloc(storage);
+    app->bt_remote_profile_count = 0;
+
+    if(storage_dir_open(dir, BAD_USB_BT_REMOTES_PROFILES_DIR)) {
+        FileInfo fi;
+        char name_buf[256];
+        while(storage_dir_read(dir, &fi, name_buf, sizeof(name_buf))) {
+            if(fi.flags & FSF_DIRECTORY) continue;
+            if(name_buf[0] == '.') continue;
+            // Only accept .cfg files
+            size_t len = strlen(name_buf);
+            size_t ext_len = strlen(BAD_USB_BT_REMOTES_CFG_EXT);
+            if(len <= ext_len) continue;
+            if(strcmp(name_buf + len - ext_len, BAD_USB_BT_REMOTES_CFG_EXT) != 0) continue;
+            // Extract filename stem (without extension)
+            size_t stem_len = len - ext_len;
+            if(stem_len >= 32) stem_len = 31;
+            strlcpy(app->bt_remote_profile_list[app->bt_remote_profile_count], name_buf, stem_len + 1);
+            app->bt_remote_profile_count++;
+            if(app->bt_remote_profile_count >= 16) break;
+        }
+    }
+    storage_dir_close(dir);
+    storage_file_free(dir);
+    furi_record_close(RECORD_STORAGE);
+}
+
+static bool bad_usb_apply_bt_remote_profile(BadUsbApp* app) {
+    if(furi_string_empty(app->bt_remote_profile)) return false;
+
+    const char* profile_name = furi_string_get_cstr(app->bt_remote_profile);
+    Storage* storage = furi_record_open(RECORD_STORAGE);
+
+    // Build path to profile .cfg
+    FuriString* cfg_path = furi_string_alloc_printf(
+        "%s/%s%s", BAD_USB_BT_REMOTES_PROFILES_DIR, profile_name, BAD_USB_BT_REMOTES_CFG_EXT);
+
+    FlipperFormat* fff = flipper_format_file_alloc(storage);
+    bool success = false;
+
+    if(flipper_format_file_open_existing(fff, furi_string_get_cstr(cfg_path))) {
+        FuriString* temp_str = furi_string_alloc();
+        uint32_t temp_uint = 0;
+        do {
+            // Validate header
+            if(!flipper_format_read_header(fff, temp_str, &temp_uint)) break;
+            if(strcmp(furi_string_get_cstr(temp_str), BAD_USB_BT_REMOTES_CFG_FILETYPE) != 0) break;
+
+            // Read name (optional — keep existing if missing)
+            if(flipper_format_read_string(fff, "name", temp_str)) {
+                strlcpy(
+                    app->script_hid_cfg.ble.name,
+                    furi_string_get_cstr(temp_str),
+                    sizeof(app->script_hid_cfg.ble.name));
+            } else {
+                flipper_format_rewind(fff);
+            }
+
+            // Read MAC (required)
+            if(!flipper_format_read_hex(
+                   fff, "mac", app->script_hid_cfg.ble.mac, sizeof(app->script_hid_cfg.ble.mac)))
+                break;
+
+            success = true;
+        } while(0);
+        furi_string_free(temp_str);
+    }
+    flipper_format_free(fff);
+    furi_string_free(cfg_path);
+
+    if(success) {
+        // Stage keys: copy profile .keys → APP_DATA_PATH(.bt_hid.keys) for bad_kb
+        FuriString* src_keys = furi_string_alloc_printf(
+            "%s/%s%s",
+            BAD_USB_BT_REMOTES_PROFILES_DIR,
+            profile_name,
+            BAD_USB_BT_REMOTES_KEYS_EXT);
+        const char* dst_keys = APP_DATA_PATH(HID_BT_KEYS_STORAGE_NAME);
+
+        // Ensure destination directory exists
+        FuriString* dst_dir = furi_string_alloc();
+        path_extract_dirname(dst_keys, dst_dir);
+        storage_simply_mkdir(storage, furi_string_get_cstr(dst_dir));
+        furi_string_free(dst_dir);
+
+        storage_common_remove(storage, dst_keys);
+        if(storage_file_exists(storage, furi_string_get_cstr(src_keys))) {
+            storage_common_copy(storage, furi_string_get_cstr(src_keys), dst_keys);
+        }
+        furi_string_free(src_keys);
+    } else {
+        // Profile cfg not found — clear selection so we don't retry on every load
+        furi_string_reset(app->bt_remote_profile);
+    }
+
+    furi_record_close(RECORD_STORAGE);
+    return success;
+}
+
+void bad_usb_select_bt_remote_profile(BadUsbApp* app, uint8_t index) {
+    furi_string_set(app->bt_remote_profile, app->bt_remote_profile_list[index]);
+    bad_usb_apply_bt_remote_profile(app);
+}
+
+void bad_usb_reapply_bt_remote_profile(BadUsbApp* app) {
+    if(!furi_string_empty(app->bt_remote_profile)) {
+        bad_usb_apply_bt_remote_profile(app);
+    }
+}
+
 static bool bad_usb_app_custom_event_callback(void* context, uint32_t event) {
     furi_assert(context);
     BadUsbApp* app = context;
@@ -120,6 +237,14 @@ static void bad_usb_load_settings(BadUsbApp* app) {
                 flipper_format_rewind(fff);
             }
 
+            if(flipper_format_read_string(fff, "bt_remote_profile", temp_str)) {
+                furi_string_set(app->bt_remote_profile, temp_str);
+                bad_usb_apply_bt_remote_profile(app);
+            } else {
+                furi_string_reset(app->bt_remote_profile);
+                flipper_format_rewind(fff);
+            }
+
             loaded = true;
         } while(0);
     }
@@ -140,6 +265,7 @@ static void bad_usb_load_settings(BadUsbApp* app) {
         hid_cfg->usb.pid = 0;
         hid_cfg->usb.manuf[0] = '\0';
         hid_cfg->usb.product[0] = '\0';
+        furi_string_reset(app->bt_remote_profile);
     }
 }
 
@@ -168,6 +294,11 @@ static void bad_usb_save_settings(BadUsbApp* app) {
             if(!flipper_format_write_string_cstr(fff, "usb_product", hid_cfg->usb.product)) break;
             if(!flipper_format_write_uint32(fff, "usb_vid", &hid_cfg->usb.vid, 1)) break;
             if(!flipper_format_write_uint32(fff, "usb_pid", &hid_cfg->usb.pid, 1)) break;
+            if(!flipper_format_write_string_cstr(
+                   fff,
+                   "bt_remote_profile",
+                   furi_string_get_cstr(app->bt_remote_profile)))
+                break;
         } while(0);
     }
 
@@ -198,6 +329,8 @@ BadUsbApp* bad_usb_app_alloc(char* arg) {
 
     app->file_path = furi_string_alloc();
     app->keyboard_layout = furi_string_alloc();
+    app->bt_remote_profile = furi_string_alloc();
+    app->bt_remote_profile_count = 0;
     if(arg && strlen(arg)) {
         furi_string_set(app->file_path, arg);
     }
@@ -312,6 +445,7 @@ void bad_usb_app_free(BadUsbApp* app) {
 
     furi_string_free(app->file_path);
     furi_string_free(app->keyboard_layout);
+    furi_string_free(app->bt_remote_profile);
 
     free(app);
 }

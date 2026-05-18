@@ -6,8 +6,6 @@
 
 #define TAG "BadUSB HID"
 
-#define HID_BT_KEYS_STORAGE_NAME ".bt_hid.keys"
-
 void hid_usb_adjust_config(BadUsbHidConfig* hid_cfg) {
     if(hid_cfg->usb.vid == 0) hid_cfg->usb.vid = HID_VID_DEFAULT;
     if(hid_cfg->usb.pid == 0) hid_cfg->usb.pid = HID_PID_DEFAULT;

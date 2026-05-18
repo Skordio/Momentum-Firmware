@@ -56,6 +56,11 @@ struct BadUsbApp {
     BadUsbHidInterface interface;
     BadUsbHidConfig user_hid_cfg;
     BadUsbHidConfig script_hid_cfg;
+
+    // BT Remotes profile selection for BLE identity
+    FuriString* bt_remote_profile;          // selected profile name stem; empty = None / Custom
+    char bt_remote_profile_list[16][32];    // cached list of available profile name stems
+    uint8_t bt_remote_profile_count;        // number of profiles found on disk
 };
 
 typedef enum {
@@ -71,3 +76,11 @@ typedef enum {
 void bad_usb_set_interface(BadUsbApp* app, BadUsbHidInterface interface);
 
 void bad_usb_app_show_loading_popup(BadUsbApp* app, bool show);
+
+void bad_usb_load_bt_remote_profile_list(BadUsbApp* app);
+
+void bad_usb_select_bt_remote_profile(BadUsbApp* app, uint8_t index);
+
+// Re-applies the currently selected bt_remotes profile into script_hid_cfg.
+// Call this after any memcpy that resets script_hid_cfg from user_hid_cfg.
+void bad_usb_reapply_bt_remote_profile(BadUsbApp* app);
