@@ -46,6 +46,7 @@ static const char* const known_ext[] = {
     [ArchiveFileTypeDiskImage] = ".img",
     [ArchiveFileTypeFolder] = "?",
     [ArchiveFileTypeProtoPirate] = ".psf",
+    [ArchiveFileTypeBtRemotesLauncher] = ".btremote",
     [ArchiveFileTypeUnknown] = "*",
     [ArchiveFileTypeAppOrJs] = ".fap|.js",
     [ArchiveFileTypeSetting] = "?",

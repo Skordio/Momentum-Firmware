@@ -32,6 +32,7 @@ typedef enum {
     ArchiveFileTypeFolder,
     ArchiveFileTypeSetting,
     ArchiveFileTypeProtoPirate,
+    ArchiveFileTypeBtRemotesLauncher,
     ArchiveFileTypeUnknown,
     ArchiveFileTypeAppOrJs,
     ArchiveFileTypeLoading,
