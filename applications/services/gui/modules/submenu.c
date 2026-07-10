@@ -4,6 +4,7 @@
 #include <gui/elements.h>
 #include <furi.h>
 #include <m-array.h>
+#include <momentum/settings.h>
 
 struct Submenu {
     View* view;
@@ -73,10 +74,11 @@ typedef struct {
 
     bool locked_message_visible;
     bool is_vertical;
+    bool repeat_scrolled; // a Repeat event moved the cursor during the current hold
 } SubmenuModel;
 
-static void submenu_process_up(Submenu* submenu);
-static void submenu_process_down(Submenu* submenu);
+static void submenu_process_up(Submenu* submenu, InputType type);
+static void submenu_process_down(Submenu* submenu, InputType type);
 static void submenu_process_ok(Submenu* submenu, InputType input_type);
 
 static size_t submenu_items_on_screen(SubmenuModel* model) {
@@ -196,11 +198,11 @@ static bool submenu_view_input_callback(InputEvent* event, void* context) {
         switch(event->key) {
         case InputKeyUp:
             consumed = true;
-            submenu_process_up(submenu);
+            submenu_process_up(submenu, event->type);
             break;
         case InputKeyDown:
             consumed = true;
-            submenu_process_down(submenu);
+            submenu_process_down(submenu, event->type);
             break;
         default:
             break;
@@ -208,11 +210,17 @@ static bool submenu_view_input_callback(InputEvent* event, void* context) {
     } else if(event->type == InputTypeRepeat) {
         if(event->key == InputKeyUp) {
             consumed = true;
-            submenu_process_up(submenu);
+            submenu_process_up(submenu, event->type);
         } else if(event->key == InputKeyDown) {
             consumed = true;
-            submenu_process_down(submenu);
+            submenu_process_down(submenu, event->type);
         }
+    } else if(
+        (event->type == InputTypePress || event->type == InputTypeRelease) &&
+        (event->key == InputKeyUp || event->key == InputKeyDown)) {
+        // A new hold starts fresh: it may wrap once at the extreme
+        with_view_model(
+            submenu->view, SubmenuModel * model, { model->repeat_scrolled = false; }, false);
     }
 
     return consumed;
@@ -243,6 +251,7 @@ Submenu* submenu_alloc(void) {
             SubmenuItemArray_init(model->items);
             model->position = 0;
             model->window_position = 0;
+            model->repeat_scrolled = false;
             model->header = furi_string_alloc();
         },
         true);
@@ -389,6 +398,7 @@ void submenu_reset(Submenu* submenu) {
             model->position = 0;
             model->window_position = 0;
             model->is_vertical = false;
+            model->repeat_scrolled = false;
             furi_string_reset(model->header);
         },
         true);
@@ -456,20 +466,30 @@ void submenu_set_selected_item(Submenu* submenu, uint32_t index) {
         true);
 }
 
-void submenu_process_up(Submenu* submenu) {
+// Wrap at the extremes always on a fresh press; during a hold that already
+// scrolled (Repeat with repeat_scrolled set) only when wrap_on_hold allows it.
+static bool submenu_allow_wrap(SubmenuModel* model, InputType type) {
+    const bool allow = momentum_settings.wrap_on_hold ||
+                       !(type == InputTypeRepeat && model->repeat_scrolled);
+    if(type == InputTypeRepeat) model->repeat_scrolled = true;
+    return allow;
+}
+
+void submenu_process_up(Submenu* submenu, InputType type) {
     with_view_model(
         submenu->view,
         SubmenuModel * model,
         {
             const size_t items_on_screen = submenu_items_on_screen(model);
             const size_t items_size = SubmenuItemArray_size(model->items);
+            const bool allow_wrap = submenu_allow_wrap(model, type);
 
             if(model->position > 0) {
                 model->position--;
                 if((model->position == model->window_position) && (model->window_position > 0)) {
                     model->window_position--;
                 }
-            } else {
+            } else if(allow_wrap && items_size > 0) {
                 model->position = items_size - 1;
                 if(model->position > items_on_screen - 1) {
                     model->window_position = model->position - (items_on_screen - 1);
@@ -479,13 +499,14 @@ void submenu_process_up(Submenu* submenu) {
         true);
 }
 
-void submenu_process_down(Submenu* submenu) {
+void submenu_process_down(Submenu* submenu, InputType type) {
     with_view_model(
         submenu->view,
         SubmenuModel * model,
         {
             const size_t items_on_screen = submenu_items_on_screen(model);
             const size_t items_size = SubmenuItemArray_size(model->items);
+            const bool allow_wrap = submenu_allow_wrap(model, type);
 
             if(model->position < items_size - 1) {
                 model->position++;
@@ -493,7 +514,7 @@ void submenu_process_down(Submenu* submenu) {
                    (model->window_position < items_size - items_on_screen)) {
                     model->window_position++;
                 }
-            } else {
+            } else if(allow_wrap && items_size > 0) {
                 model->position = 0;
                 model->window_position = 0;
             }

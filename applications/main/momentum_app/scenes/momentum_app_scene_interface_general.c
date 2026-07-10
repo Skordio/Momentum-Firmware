@@ -2,7 +2,9 @@
 
 enum VarItemListIndex {
     VarItemListIndexScrollType,
+    VarItemListIndexListWraparound,
     VarItemListIndexMidnightFormat,
+    VarItemListIndexPopupOverlay,
 };
 
 void momentum_app_scene_interface_general_var_item_list_callback(void* context, uint32_t index) {
@@ -15,6 +17,14 @@ static void momentum_app_scene_interface_general_scroll_marquee_changed(Variable
     bool value = variable_item_get_current_value_index(item);
     variable_item_set_current_value_text(item, value ? "Marquee" : "Standard");
     momentum_settings.scroll_marquee = value;
+    app->save_settings = true;
+}
+
+static void momentum_app_scene_interface_general_wrap_on_hold_changed(VariableItem* item) {
+    MomentumApp* app = variable_item_get_context(item);
+    bool value = variable_item_get_current_value_index(item);
+    variable_item_set_current_value_text(item, value ? "Instant" : "Re-press");
+    momentum_settings.wrap_on_hold = value;
     app->save_settings = true;
 }
 
@@ -48,6 +58,16 @@ void momentum_app_scene_interface_general_on_enter(void* context) {
     variable_item_set_current_value_index(item, momentum_settings.scroll_marquee);
     variable_item_set_current_value_text(
         item, momentum_settings.scroll_marquee ? "Marquee" : "Standard");
+
+    item = variable_item_list_add(
+        var_item_list,
+        "List Wraparound",
+        2,
+        momentum_app_scene_interface_general_wrap_on_hold_changed,
+        app);
+    variable_item_set_current_value_index(item, momentum_settings.wrap_on_hold);
+    variable_item_set_current_value_text(
+        item, momentum_settings.wrap_on_hold ? "Instant" : "Re-press");
 
     item = variable_item_list_add(
         var_item_list,

@@ -38,10 +38,13 @@ typedef struct {
     FuriString* header;
     size_t scroll_counter;
     bool locked_message_visible;
+    bool repeat_scrolled; // a Repeat event moved the cursor during the current hold
 } VariableItemListModel;
 
-static void variable_item_list_process_up(VariableItemList* variable_item_list);
-static void variable_item_list_process_down(VariableItemList* variable_item_list);
+static void
+    variable_item_list_process_up(VariableItemList* variable_item_list, InputType type);
+static void
+    variable_item_list_process_down(VariableItemList* variable_item_list, InputType type);
 static void variable_item_list_process_left(VariableItemList* variable_item_list);
 static void variable_item_list_process_right(VariableItemList* variable_item_list);
 static void variable_item_list_process_ok(VariableItemList* variable_item_list);
@@ -248,11 +251,11 @@ static bool variable_item_list_input_callback(InputEvent* event, void* context) 
         switch(event->key) {
         case InputKeyUp:
             consumed = true;
-            variable_item_list_process_up(variable_item_list);
+            variable_item_list_process_up(variable_item_list, event->type);
             break;
         case InputKeyDown:
             consumed = true;
-            variable_item_list_process_down(variable_item_list);
+            variable_item_list_process_down(variable_item_list, event->type);
             break;
         case InputKeyLeft:
             consumed = true;
@@ -272,11 +275,11 @@ static bool variable_item_list_input_callback(InputEvent* event, void* context) 
         switch(event->key) {
         case InputKeyUp:
             consumed = true;
-            variable_item_list_process_up(variable_item_list);
+            variable_item_list_process_up(variable_item_list, event->type);
             break;
         case InputKeyDown:
             consumed = true;
-            variable_item_list_process_down(variable_item_list);
+            variable_item_list_process_down(variable_item_list, event->type);
             break;
         case InputKeyLeft:
             consumed = true;
@@ -289,24 +292,43 @@ static bool variable_item_list_input_callback(InputEvent* event, void* context) 
         default:
             break;
         }
+    } else if(
+        (event->type == InputTypePress || event->type == InputTypeRelease) &&
+        (event->key == InputKeyUp || event->key == InputKeyDown)) {
+        // A new hold starts fresh: it may wrap once at the extreme
+        with_view_model(
+            variable_item_list->view,
+            VariableItemListModel * model,
+            { model->repeat_scrolled = false; },
+            false);
     }
 
     return consumed;
 }
 
-void variable_item_list_process_up(VariableItemList* variable_item_list) {
+// Wrap at the extremes always on a fresh press; during a hold that already
+// scrolled (Repeat with repeat_scrolled set) only when wrap_on_hold allows it.
+static bool variable_item_list_allow_wrap(VariableItemListModel* model, InputType type) {
+    const bool allow = momentum_settings.wrap_on_hold ||
+                       !(type == InputTypeRepeat && model->repeat_scrolled);
+    if(type == InputTypeRepeat) model->repeat_scrolled = true;
+    return allow;
+}
+
+void variable_item_list_process_up(VariableItemList* variable_item_list, InputType type) {
     with_view_model(
         variable_item_list->view,
         VariableItemListModel * model,
         {
             uint8_t items_on_screen = variable_item_list_items_on_screen(model);
+            const bool allow_wrap = variable_item_list_allow_wrap(model, type);
             if(model->position > 0) {
                 model->position--;
 
                 if((model->position == model->window_position) && (model->window_position > 0)) {
                     model->window_position--;
                 }
-            } else {
+            } else if(allow_wrap && VariableItemArray_size(model->items) > 0) {
                 model->position = VariableItemArray_size(model->items) - 1;
                 if(model->position > (items_on_screen - 1)) {
                     model->window_position = model->position - (items_on_screen - 1);
@@ -317,12 +339,13 @@ void variable_item_list_process_up(VariableItemList* variable_item_list) {
         true);
 }
 
-void variable_item_list_process_down(VariableItemList* variable_item_list) {
+void variable_item_list_process_down(VariableItemList* variable_item_list, InputType type) {
     with_view_model(
         variable_item_list->view,
         VariableItemListModel * model,
         {
             uint8_t items_on_screen = variable_item_list_items_on_screen(model);
+            const bool allow_wrap = variable_item_list_allow_wrap(model, type);
             if(model->position < (VariableItemArray_size(model->items) - 1)) {
                 model->position++;
                 if((model->position - model->window_position) > (items_on_screen - 2) &&
@@ -330,7 +353,7 @@ void variable_item_list_process_down(VariableItemList* variable_item_list) {
                        (VariableItemArray_size(model->items) - items_on_screen)) {
                     model->window_position++;
                 }
-            } else {
+            } else if(allow_wrap && VariableItemArray_size(model->items) > 0) {
                 model->position = 0;
                 model->window_position = 0;
             }
@@ -459,6 +482,7 @@ VariableItemList* variable_item_list_alloc(void) {
             model->window_position = 0;
             model->header = furi_string_alloc();
             model->scroll_counter = 0;
+            model->repeat_scrolled = false;
         },
         true);
     variable_item_list->scroll_timer = furi_timer_alloc(
@@ -509,6 +533,7 @@ void variable_item_list_reset(VariableItemList* variable_item_list) {
                 furi_string_free(VariableItemArray_ref(it)->locked_message);
             }
             VariableItemArray_reset(model->items);
+            model->repeat_scrolled = false;
             furi_string_reset(model->header);
         },
         false);

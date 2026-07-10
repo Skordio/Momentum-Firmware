@@ -104,6 +104,9 @@ typedef struct {
     FuriHalVersionColor spoof_color;
     ScreenFrameColor rpc_color_fg;
     ScreenFrameColor rpc_color_bg;
+    // Keep new fields at the end: FAPs read the exported global by struct
+    // offset, so inserting mid-struct breaks already-compiled apps.
+    bool wrap_on_hold; // list wraparound during hold-scroll (false = re-press to wrap)
 } MomentumSettings;
 
 void momentum_settings_save(void);
